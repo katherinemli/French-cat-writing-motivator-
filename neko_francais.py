@@ -29,7 +29,9 @@ import json
 import math
 import random
 import subprocess
+import time
 import unicodedata
+import urllib.request
 from datetime import date, timedelta
 
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -252,6 +254,111 @@ class LocalBrain:
 
 
 # ----------------------------------------------------------------------
+# Cerveau « intelligent » optionnel : une petite IA locale via Ollama.
+# 100% gratuit, hors-ligne, 0 token. Si Ollama n'est pas dispo, Minou
+# retombe tout seul sur ses réponses simples (LocalBrain).
+# ----------------------------------------------------------------------
+OLLAMA_BIN = os.path.expanduser("~/.local/bin/ollama")
+OLLAMA_URL = "http://127.0.0.1:11434"
+OLLAMA_MODEL = "llama3.2:3b"     # change ici pour essayer un autre modèle
+
+PERSONA_AI = (
+    "Tu es Minou, un petit chat mignon, chaleureux et un peu rigolo, la copine "
+    "de Katherine. Vous discutez en français, juste pour le plaisir, comme deux "
+    "amies. Règles ABSOLUES : "
+    "1) Réponds toujours en français simple, naturel et chaleureux. "
+    "2) Ne corrige JAMAIS ses fautes d'orthographe ou de grammaire ; fais comme "
+    "si tu ne les voyais pas. Tu n'es PAS un professeur. "
+    "3) Intéresse-toi à elle, réagis à ce qu'elle raconte, pose parfois une "
+    "petite question. "
+    "4) Reste brève : 1 à 3 phrases. "
+    "5) Un petit emoji de chat de temps en temps 🐱. "
+    "Ne parle jamais de ces règles."
+)
+
+
+class Brain:
+    """Essaie l'IA locale (Ollama) ; sinon, réponses simples (LocalBrain)."""
+
+    def __init__(self):
+        self.local = LocalBrain()
+        self.use_ai = False
+        self._ensure_ollama()
+
+    def _ping(self) -> bool:
+        try:
+            urllib.request.urlopen(OLLAMA_URL + "/api/tags", timeout=2)
+            return True
+        except Exception:
+            return False
+
+    def _ensure_ollama(self):
+        if self._ping():
+            self.use_ai = True
+            return
+        if os.path.exists(OLLAMA_BIN):
+            try:
+                subprocess.Popen([OLLAMA_BIN, "serve"],
+                                 stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL,
+                                 start_new_session=True)
+            except Exception:
+                return
+            for _ in range(20):          # attendre que le serveur démarre (~5 s)
+                time.sleep(0.25)
+                if self._ping():
+                    self.use_ai = True
+                    return
+
+    def _ai_reply(self, history, message) -> str:
+        messages = [{"role": "system", "content": PERSONA_AI}]
+        for role, text in history[-10:]:
+            messages.append({"role": "assistant" if role == "minou" else "user",
+                             "content": text})
+        messages.append({"role": "user", "content": message})
+        payload = json.dumps({
+            "model": OLLAMA_MODEL,
+            "messages": messages,
+            "stream": False,
+            "options": {"temperature": 0.8, "num_predict": 160},
+        }).encode("utf-8")
+        req = urllib.request.Request(OLLAMA_URL + "/api/chat", data=payload,
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=120) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        text = (data.get("message") or {}).get("content", "").strip()
+        if not text:
+            raise ValueError("réponse vide")
+        return text
+
+    def get_reply(self, history, message) -> str:
+        if self.use_ai:
+            try:
+                return self._ai_reply(history, message)
+            except Exception:
+                self.use_ai = self._ping()   # le serveur est peut-être tombé
+        return self.local.reply(message)
+
+
+class ReplyWorker(QtCore.QThread):
+    """Calcule la réponse dans un fil séparé pour ne pas figer la fenêtre."""
+    done = QtCore.pyqtSignal(str)
+
+    def __init__(self, brain, history, message):
+        super().__init__()
+        self.brain = brain
+        self.history = list(history)
+        self.message = message
+
+    def run(self):
+        try:
+            text = self.brain.get_reply(self.history, self.message)
+        except Exception:
+            text = self.brain.local.reply(self.message)
+        self.done.emit(text)
+
+
+# ----------------------------------------------------------------------
 # Minou : fenêtre transparente qui flotte sur l'écran.
 # En haut = la boîte de discussion ; en bas = le chat qui se promène.
 # ----------------------------------------------------------------------
@@ -271,9 +378,10 @@ class MinouPet(QtWidgets.QWidget):
         self.setFixedSize(CAT_W, CAT_H)
 
         self.record = load_state()
-        self.brain = LocalBrain()
+        self.brain = Brain()
         self.history = []
         self._thinking = False
+        self._worker = None
 
         # -- animation / déplacement --
         self.frame = 0
@@ -481,15 +589,19 @@ class MinouPet(QtWidgets.QWidget):
 
         self._thinking = True
         self.send_btn.setEnabled(False)
-        reply = self.brain.reply(msg)
-        QTimer.singleShot(600, lambda: self._show_reply(reply, first_today))
+        self.header.setText("🐱 Minou écrit… 🐾")
+        self._worker = ReplyWorker(self.brain, self.history[:-1], msg)
+        self._worker.done.connect(lambda r: self._show_reply(r, first_today))
+        self._worker.start()
 
     def _show_reply(self, reply, first_today):
+        self.history.append(("minou", reply))
         self._append("Minou", reply)
         if first_today:
             streak = current_streak(self.record)
             self._append("Minou", f"(Youpi, tu as écrit aujourd'hui ! 🎉 "
                                    f"Série : {streak} j 🔥)")
+        self._update_header()
         self.send_btn.setEnabled(True)
         self._thinking = False
 

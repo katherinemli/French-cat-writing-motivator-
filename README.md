@@ -23,6 +23,14 @@ Pour quitter : clic droit sur Minou → *Quitter* (ou `Ctrl+C`).
 - Python 3
 - PyQt5 — `sudo apt install python3-pyqt5`
 
+## 🧠 IA locale (optionnelle)
+Par défaut Minou répond avec un petit moteur simple (des phrases pré-écrites).
+Si tu installes [**Ollama**](https://ollama.com) et un modèle (ex. `llama3.2:3b`),
+Minou utilise une **vraie petite IA qui tourne sur ta machine** — toujours
+**gratuit, hors-ligne, sans aucun token**. L'appli démarre Ollama toute seule
+si besoin. Si l'IA n'est pas là, Minou repasse automatiquement sur le mode simple.
+Tu peux changer le modèle en haut de `neko_francais.py` (`OLLAMA_MODEL`).
+
 ## 🛠️ Personnaliser
 Tout en haut de `neko_francais.py`, tu peux changer les listes de phrases
 (`QUESTIONS`, `GREETINGS`, `REACTIONS`, `TOPICS`…) et les réglages

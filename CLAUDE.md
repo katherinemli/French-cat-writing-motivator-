@@ -20,10 +20,13 @@ s'ouvre au-dessus de sa tête pour papoter en français.
 ## Architecture (tout dans neko_francais.py)
 - `MinouPet` : la fenêtre flottante. 2 modes : **promenade** (juste le chat)
   et **discussion** (clic → boîte sur la tête ; × ou Échap pour fermer).
-- `LocalBrain.reply()` : choisit une réponse amicale à partir des listes
-  éditables en haut du fichier (`GREETINGS`, `QUESTIONS`, `REACTIONS`,
-  `TOPICS`…). Pour rendre Minou plus malin plus tard : remplacer cette
-  méthode (par ex. une IA locale via Ollama).
+- `Brain.get_reply()` : essaie d'abord une **IA locale via Ollama**
+  (modèle `OLLAMA_MODEL`, par défaut `llama3.2:3b`) ; si Ollama/le modèle
+  n'est pas dispo, **repli automatique** sur `LocalBrain.reply()` (réponses
+  simples à partir des listes éditables `GREETINGS`, `QUESTIONS`, `REACTIONS`,
+  `TOPICS`…). Les réponses sont calculées dans un `ReplyWorker` (QThread) pour
+  ne pas figer la fenêtre. L'appli démarre `ollama serve` toute seule si besoin.
+  Reste 100 % local, gratuit, 0 token.
 - Le chat est dessiné 100 % en code avec QPainter (aucune image).
 - Humeur : triste 🥺 tant qu'on n'a pas écrit aujourd'hui, content 😺 dès le
   premier message (cœurs + série de jours).
